@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#08080a" />
+    <title>SmartMMM · Control</title>
+    <link rel="stylesheet" href="/shared/style.css" />
+  </head>
+  <body>
+    <main class="phone">
+      <header class="phone-header">
+        <div>
+          <h1 id="name">SmartMMM</h1>
+          <div class="meta" id="meta"></div>
+        </div>
+        <span class="conn" id="conn" data-state="connecting">connecting</span>
+      </header>
+      <section id="modules"></section>
+    </main>
+    <div class="scrim" id="scrim" hidden></div>
+    <section
+      class="sheet"
+      id="sheet"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Module tools"
+      hidden
+    ></section>
+    <div class="toasts" id="toasts"></div>
+    <script type="module" src="/phone.js"></script>
+  </body>
+</html>

@@ -1,0 +1,27 @@
+[Unit]
+Description=SmartMMM mirror display (Chromium kiosk)
+After=smartmmm.service graphical.target
+Wants=smartmmm.service
+
+[Service]
+Type=simple
+User=pi
+# Raspberry Pi OS Bookworm is Wayland/labwc; Chromium runs through XWayland.
+Environment=DISPLAY=:0
+# Wait for the core to answer before opening the window, so we never show a
+# connection error on the mirror.
+ExecStartPre=/bin/sh -c 'until curl -sf http://localhost:8080/api/v1/info >/dev/null; do sleep 1; done'
+# The binary is `chromium-browser` on Raspberry Pi OS; use `chromium` on distros
+# that only ship the upstream package.
+ExecStart=/usr/bin/chromium-browser \
+    --kiosk \
+    --noerrdialogs \
+    --disable-infobars \
+    --disable-session-crashed-bubble \
+    --check-for-update-interval=31536000 \
+    --app=http://localhost:8080/
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target

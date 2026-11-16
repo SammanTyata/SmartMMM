@@ -1,0 +1,78 @@
+# SmartMMM configuration.
+#
+# Copy to `config.toml` (which is gitignored) or to one of the searched paths:
+#   /etc/smartmmm/config.toml
+#   $XDG_CONFIG_HOME/smartmmm/config.toml   (default: ~/.config/...)
+#   ./config.toml
+# An explicit `--config <path>` overrides the search.
+#
+# This file is read once at startup and is never written by the process. Runtime
+# changes made from the phone (visibility, region, order, per-module config) are
+# kept in a separate state file instead, and take precedence over the values
+# here. `smartmmm doctor` prints where that file is; delete it to hand every
+# module back to this one.
+
+[core]
+listen = "0.0.0.0:8080"
+name = "Hallway Mirror"
+log_level = "info"
+# Leave unset to run open on the LAN (development). Set a token to require
+# `Authorization: Bearer <token>` on mutating API requests.
+# auth_token = "change-me"
+
+[display]
+driver = "auto" # auto | pi_vcgencmd | pi_cec | macos | noop
+brightness = 0.9
+
+[presence]
+driver = "noop" # noop | gpio_pir | camera
+wake_on_motion = false
+
+# --- Modules ---------------------------------------------------------------
+# Anything omitted falls back to the module's manifest defaults. Each module
+# publishes a JSON Schema (see GET /api/v1/modules) describing its `config`.
+
+[modules.clock]
+visible = true
+region = "top_left"
+order = 0
+[modules.clock.config]
+format_24h = true
+show_seconds = false
+show_date = true
+
+[modules.weather]
+visible = true
+region = "top_right"
+order = 10
+[modules.weather.config]
+label = "Amsterdam"
+latitude = 52.37
+longitude = 4.90
+units = "metric"
+
+[modules.news]
+visible = true
+region = "lower_third"
+order = 20
+[modules.news.config]
+label = "News"
+feeds = [
+  { url = "https://feeds.bbci.co.uk/news/rss.xml", label = "BBC" },
+  { url = "https://www.theverge.com/rss/index.xml", label = "The Verge" },
+]
+max_items = 30
+show_age = true
+
+# Headless module: sleeps the display after inactivity, wakes it on motion.
+# Hiding it in the phone pauses auto-sleep. `display_driver = "auto"` picks
+# vcgencmd (Pi), CEC, or macOS pmset from what is installed.
+[modules.presence]
+visible = true
+order = 90
+[modules.presence.config]
+gpio_chip = "/dev/gpiochip0"
+gpio_pin = 21          # BCM numbering: physical pin 40
+active_high = true
+timeout_secs = 30
+display_driver = "auto"

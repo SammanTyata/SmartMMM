@@ -1,0 +1,7 @@
+/target
+config.toml
+# Runtime state, written next to the binary when no --state/--XDG_STATE_HOME is set.
+state.json
+state.json.tmp
+*.log
+.DS_Store

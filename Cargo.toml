@@ -1,0 +1,47 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/protocol",
+    "crates/core",
+    "crates/server",
+    "crates/modules/clock",
+    "crates/modules/weather",
+    "crates/modules/news",
+    "crates/modules/presence",
+    "bin/smartmmm",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+rust-version = "1.75"
+
+[workspace.dependencies]
+smmm-protocol = { path = "crates/protocol" }
+smmm-core = { path = "crates/core" }
+smmm-server = { path = "crates/server" }
+smmm-mod-clock = { path = "crates/modules/clock" }
+smmm-mod-weather = { path = "crates/modules/weather" }
+smmm-mod-news = { path = "crates/modules/news" }
+smmm-mod-presence = { path = "crates/modules/presence" }
+
+anyhow = "1"
+async-trait = "0.1"
+axum = { version = "0.8", features = ["ws"] }
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+futures = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal", "net", "fs"] }
+tokio-stream = "0.1"
+toml = "0.8"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+quick-xml = "0.37"
+url = "2"
+gpio-cdev = "0.6"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

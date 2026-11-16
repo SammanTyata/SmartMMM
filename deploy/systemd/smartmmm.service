@@ -1,0 +1,22 @@
+[Unit]
+Description=SmartMMM core (module host + HTTP/WS API)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/opt/smartmmm
+ExecStart=/opt/smartmmm/smartmmm run --config /etc/smartmmm/config.toml
+Restart=always
+RestartSec=3
+# Runtime changes (visibility, layout, config edited from the phone) are written
+# to $STATE_DIRECTORY/state.json. systemd creates the directory with the right
+# owner, and it survives redeploying the binary.
+StateDirectory=smartmmm
+Environment=RUST_LOG=info
+# Logs go to the journal. Cap the journal size (journald.conf) so a 24/7
+# mirror does not grind down the SD card.
+
+[Install]
+WantedBy=multi-user.target
