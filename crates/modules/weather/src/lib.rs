@@ -11,7 +11,12 @@ use smmm_protocol::{
 };
 
 const UPDATE_INTERVAL: Duration = Duration::from_secs(15 * 60);
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+/// Open-Meteo occasionally stalls long enough to trip the timeout. Retry a
+/// few times with short backoff so one slow response doesn't blank the module
+/// until the next poll (15 minutes later).
+const FETCH_ATTEMPTS: u32 = 3;
+const RETRY_DELAY: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -193,6 +198,27 @@ impl WeatherModule {
     }
 
     async fn fetch(&self) -> anyhow::Result<Observation> {
+        let mut last_err: Option<anyhow::Error> = None;
+        for attempt in 1..=FETCH_ATTEMPTS {
+            match self.fetch_once().await {
+                Ok(observation) => return Ok(observation),
+                Err(e) => {
+                    if let Some(ctx) = &self.ctx {
+                        ctx.warn(format!(
+                            "fetch attempt {attempt}/{FETCH_ATTEMPTS} failed: {e:#}"
+                        ));
+                    }
+                    last_err = Some(e);
+                    if attempt < FETCH_ATTEMPTS {
+                        tokio::time::sleep(RETRY_DELAY).await;
+                    }
+                }
+            }
+        }
+        Err(last_err.expect("at least one fetch attempt was made"))
+    }
+
+    async fn fetch_once(&self) -> anyhow::Result<Observation> {
         let response = self
             .client
             .get(self.endpoint())
