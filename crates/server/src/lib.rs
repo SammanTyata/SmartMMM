@@ -35,8 +35,10 @@ const PHONE_JS: &str = include_str!("../../../ui/phone/phone.js");
 const SHARED_JS: &str = include_str!("../../../ui/shared/protocol.js");
 const SHARED_CSS: &str = include_str!("../../../ui/shared/style.css");
 
-/// Weather icon SVGs, keyed by WMO-code-derived name (see the weather module).
-/// Embedded like the UI assets so the deployment stays a single binary.
+/// Weather icon SVGs (Meteocons, filled style — see
+/// `ui/icons/weather/ATTRIBUTION`), keyed by WMO-code-derived name (see the
+/// weather module). Embedded like the UI assets so the deployment stays a
+/// single binary.
 const WEATHER_ICONS: &[(&str, &str)] = &[
     (
         "clear-day",
@@ -47,10 +49,13 @@ const WEATHER_ICONS: &[(&str, &str)] = &[
         include_str!("../../../ui/icons/weather/clear-night.svg"),
     ),
     (
-        "cloudy",
-        include_str!("../../../ui/icons/weather/cloudy.svg"),
+        "mostly-clear-day",
+        include_str!("../../../ui/icons/weather/mostly-clear-day.svg"),
     ),
-    ("mist", include_str!("../../../ui/icons/weather/mist.svg")),
+    (
+        "mostly-clear-night",
+        include_str!("../../../ui/icons/weather/mostly-clear-night.svg"),
+    ),
     (
         "partly-cloudy-day",
         include_str!("../../../ui/icons/weather/partly-cloudy-day.svg"),
@@ -60,18 +65,37 @@ const WEATHER_ICONS: &[(&str, &str)] = &[
         include_str!("../../../ui/icons/weather/partly-cloudy-night.svg"),
     ),
     (
-        "rain-day",
-        include_str!("../../../ui/icons/weather/rain-day.svg"),
+        "overcast-day",
+        include_str!("../../../ui/icons/weather/overcast-day.svg"),
     ),
     (
-        "rain-night",
-        include_str!("../../../ui/icons/weather/rain-night.svg"),
+        "overcast-night",
+        include_str!("../../../ui/icons/weather/overcast-night.svg"),
+    ),
+    ("fog-day", include_str!("../../../ui/icons/weather/fog-day.svg")),
+    (
+        "fog-night",
+        include_str!("../../../ui/icons/weather/fog-night.svg"),
     ),
     ("rain", include_str!("../../../ui/icons/weather/rain.svg")),
+    ("drizzle", include_str!("../../../ui/icons/weather/drizzle.svg")),
+    ("sleet", include_str!("../../../ui/icons/weather/sleet.svg")),
     ("snow", include_str!("../../../ui/icons/weather/snow.svg")),
     (
-        "thunderstorm",
-        include_str!("../../../ui/icons/weather/thunderstorm.svg"),
+        "snowflake",
+        include_str!("../../../ui/icons/weather/snowflake.svg"),
+    ),
+    (
+        "thunderstorms-day",
+        include_str!("../../../ui/icons/weather/thunderstorms-day.svg"),
+    ),
+    (
+        "thunderstorms-night",
+        include_str!("../../../ui/icons/weather/thunderstorms-night.svg"),
+    ),
+    (
+        "thunderstorms-hail",
+        include_str!("../../../ui/icons/weather/thunderstorms-hail.svg"),
     ),
 ];
 

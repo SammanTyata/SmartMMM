@@ -557,43 +557,36 @@ fn weather_code_label(code: i32) -> &'static str {
     }
 }
 
-/// Map a WMO weather code to one of the icon SVGs under `/icons/weather/`.
-/// Daily forecasts are rendered with the day variant; the current-conditions
-/// icon picks day or night from the API's `is_day` flag.
+/// Map a WMO weather code to one of the Meteocon SVGs under `/icons/weather/`
+/// (filled style, see `ui/icons/weather/ATTRIBUTION`). The current-conditions
+/// icon picks day or night from the API's `is_day` flag; daily forecasts are
+/// rendered with the day variant. Rain, drizzle, sleet and snow have no
+/// day/night variants in the set, so those codes use the plain icon.
 fn weather_icon_name(code: i32, is_day: bool) -> &'static str {
+    let day_or_night = |day: &'static str, night: &'static str| -> &'static str {
+        if is_day {
+            day
+        } else {
+            night
+        }
+    };
     match code {
-        0 | 1 => {
-            if is_day {
-                "clear-day"
-            } else {
-                "clear-night"
-            }
-        }
-        2 => {
-            if is_day {
-                "partly-cloudy-day"
-            } else {
-                "partly-cloudy-night"
-            }
-        }
-        3 => "cloudy",
-        45 | 48 => "mist",
-        51..=57 | 61..=67 | 80..=82 => {
-            if is_day {
-                "rain-day"
-            } else {
-                "rain-night"
-            }
-        }
-        71..=77 | 85 | 86 => "snow",
-        95 | 96 | 99 => "thunderstorm",
-        _ => {
-            if is_day {
-                "partly-cloudy-day"
-            } else {
-                "partly-cloudy-night"
-            }
-        }
+        0 => day_or_night("clear-day", "clear-night"),
+        1 => day_or_night("mostly-clear-day", "mostly-clear-night"),
+        2 => day_or_night("partly-cloudy-day", "partly-cloudy-night"),
+        3 => day_or_night("overcast-day", "overcast-night"),
+        45 | 48 => day_or_night("fog-day", "fog-night"),
+        51..=55 => "drizzle",
+        56 | 57 => "sleet",
+        61..=65 => "rain",
+        66 | 67 => "sleet",
+        71..=75 => "snow",
+        77 => "snowflake",
+        80..=82 => "rain",
+        85 | 86 => "snow",
+        95 => day_or_night("thunderstorms-day", "thunderstorms-night"),
+        96 | 99 => "thunderstorms-hail",
+        _ => day_or_night("partly-cloudy-day", "partly-cloudy-night"),
     }
 }
 

@@ -1,0 +1,7 @@
+Weather icons from Meteocons by Bas Milius — https://github.com/basmilius/meteocons
+
+Filled style, from the @meteocons/svg-static package (v0.1.0), vendored here
+so the binary stays self-contained.
+
+MIT License — Copyright (c) 2020-present Bas Milius. Full license text in the
+repository link above.
