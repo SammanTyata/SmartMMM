@@ -8,15 +8,22 @@ Design lives in [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
 ## Status
 
-**M0 complete** — the skeleton runs end to end, with two real modules.
+Running end to end on a Raspberry Pi 4 (native build), with four modules:
 
-- Rust core: module registry, state store, event bus, config, host runtime
+- Rust core: module registry, state store, event bus, config, persistence, host runtime
 - axum HTTP + WebSocket API
 - Mirror UI (renders the view tree) and phone control UI
-- Modules: `clock`, `weather` (Open-Meteo, no API key)
+- Modules: `clock`, `weather` (Open-Meteo, no API key), `news` (RSS), `presence`
+  (GPIO PIR that sleeps/wakes the display via `vcgencmd`)
+- Resilience: network fetches retry transient failures — the weather module
+  retries 3× with a 15 s request timeout, so one slow Open-Meteo response no
+  longer blanks the module until its next poll
+- Deployment: `deploy/smartmmm.service` (systemd) plus a `labwc` kiosk watchdog
+  in `deploy/labwc/` that relaunches Chromium if it dies
 
-Not yet done: auth/pairing (the hook exists but there is no QR flow), display
-power control, presence sensors. See the roadmap in the design doc.
+Not yet done: auth/pairing (the hook exists but there is no QR flow), the
+`calendar` and `sysinfo` modules, config hot-reload. See the roadmap in the
+design doc.
 
 ## Quick start
 
@@ -42,11 +49,13 @@ crates/core/             module trait, registry, state store, config, host runti
 crates/server/           axum routes, WebSocket, embedded UI assets
 crates/modules/clock/    reference module (no config dependencies)
 crates/modules/weather/  reference module (async I/O, tools, degraded states)
+crates/modules/news/     RSS headlines (multi-feed, lower-third strip)
+crates/modules/presence/ PIR motion → display sleep/wake (headless)
 ui/mirror/               mirror renderer (pure subscriber)
 ui/phone/                phone control UI
 ui/shared/               shared CSS + protocol client (view renderer, API, WS)
 bin/smartmmm/            binary: wiring, CLI, doctor
-deploy/                  systemd + launchd units
+deploy/                  systemd + launchd units, labwc kiosk watchdog
 ```
 
 ## Module contract
@@ -169,22 +178,41 @@ actually has rather than a blank or defaulted form.
 
 ## Deploying to a Raspberry Pi 4
 
-```sh
-cargo install cross                                  # or: cargo install cargo-zigbuild
-cross build --release --target aarch64-unknown-linux-gnu
+The current deployment builds natively on the Pi (slow but frictionless) and
+drives the display with a `labwc` autostart watchdog rather than a second
+systemd unit.
 
-scp target/aarch64-unknown-linux-gnu/release/smartmmm pi@mirror:/opt/smartmmm/
-scp config.example.toml pi@mirror:/etc/smartmmm/config.toml
-scp deploy/systemd/*.service pi@mirror:/etc/systemd/system/
-ssh pi@mirror 'sudo systemctl enable --now smartmmm smartmmm-display'
+```sh
+# On the Pi (Raspberry Pi OS Bookworm, 64-bit), as the user who owns the session:
+git clone <repo> ~/smartmmm && cd ~/smartmmm
+~/.cargo/bin/cargo build --release
+
+sudo cp deploy/smartmmm.service /etc/systemd/system/   # check User=/ExecStart= paths
+sudo cp config.example.toml /etc/smartmmm/config.toml  # then edit it
+sudo systemctl daemon-reload && sudo systemctl enable --now smartmmm
+
+# Renderer: kiosk watchdog launched by the labwc session
+mkdir -p ~/.config/labwc
+cp deploy/labwc/mirror-kiosk.sh ~/.config/labwc/
+cp deploy/labwc/autostart ~/.config/labwc/autostart
+chmod +x ~/.config/labwc/mirror-kiosk.sh
 ```
+
+Cross-compiling from the Mac also works (`cross build --release --target
+aarch64-unknown-linux-gnu`); adjust the unit's `ExecStart=` to wherever the
+binary lands.
 
 Run `smartmmm doctor` on the Pi afterwards: it reports temperature, throttle
 state, and which display-control tools are present.
 
+The kiosk watchdog waits until the server answers on `localhost:8080` before
+launching Chromium, and relaunches it if it ever exits — so a crashed browser
+recovers in seconds instead of leaving a blank (white) screen until the next
+reboot.
+
 The unit sets `StateDirectory=smartmmm`, so runtime state lives in
-`/var/lib/smartmmm/state.json`, owned by `pi` and untouched by a redeploy of the
-binary.
+`/var/lib/smartmmm/state.json`, owned by the service user and untouched by a
+redeploy of the binary.
 
 ## Development
 

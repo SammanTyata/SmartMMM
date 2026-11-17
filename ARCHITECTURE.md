@@ -3,7 +3,11 @@
 A modular smart-mirror application with a Rust core and first-class smartphone control,
 running identically on macOS and Raspberry Pi.
 
-> Status: design draft. No code yet.
+> Status: implemented through the appliance milestone on a live Raspberry Pi 4 —
+> core, server, phone UI, and the `clock`, `weather`, `news` and `presence`
+> modules are running. Not yet built: QR pairing/auth, `calendar`/`sysinfo`,
+> config hot-reload, the WASM module host. Design details below that are not
+> yet implemented are marked as such.
 
 ---
 
@@ -229,6 +233,14 @@ pub struct ModuleCtx {
 }
 ```
 
+Modules own their resilience. A failing fetch must degrade the module's
+`status` (see `ModuleStatus::Degraded` in §6.1) rather than panic or take the
+host down, and transient network errors are retried in-process. The weather
+module, for example, gives Open-Meteo a 15 s timeout and retries the fetch up
+to three times with a 2 s backoff: the API occasionally stalls long enough to
+trip a single attempt, and without retries one slow response would blank the
+module until its next 15-minute poll.
+
 ### 5.2 Registration
 
 v1 uses an **explicit registry** in the core (`registry::builtin()`), which is simple, greppable,
@@ -240,8 +252,8 @@ pub fn builtin() -> Vec<ModuleFactory> {
     vec![
         clock::factory(),
         weather::factory(),
-        calendar::factory(),
-        sysinfo::factory(),
+        news::factory(),
+        presence::factory(),
     ]
 }
 ```
@@ -617,19 +629,28 @@ current host — the single fastest way to diagnose Pi-specific problems.
 - Use the **64-bit** image and the official 5 V/3 A USB-C supply. Confirm no undervoltage with
   `vcgencmd get_throttled` (`0x0` is healthy).
 - Force a 1080p output for the mirror panel; leave headroom rather than driving 4K.
-- Build on the Mac with `cross` or `cargo-zigbuild` targeting `aarch64-unknown-linux-gnu`,
-  or build natively on the Pi (slow, but frictionless). Produce one stripped binary.
-- `deploy/systemd/smartmmm.service` — the core, `Restart=always`, `After=network-online.target`.
-- `deploy/systemd/smartmmm-display.service` — the renderer shell, `After=smartmmm.service`,
-  runs `chromium --kiosk --noerrdialogs --disable-infobars --app=http://localhost:8080/`.
-  Kiosk flags are pinned in one file so they are easy to tune.
+- Build natively on the Pi (`cargo build --release` — slow, but frictionless) or cross-compile
+  from the Mac with `cross` or `cargo-zigbuild` targeting `aarch64-unknown-linux-gnu`.
+  Produce one stripped binary.
+- `deploy/smartmmm.service` — the core, `Restart=on-failure`, `After=network-online.target`,
+  `StateDirectory=smartmmm`, supplementary `gpio`/`video` groups for the PIR and
+  `vcgencmd` display control. *(Implemented.)*
+- `deploy/labwc/mirror-kiosk.sh` + `deploy/labwc/autostart` — the renderer. A small watchdog
+  launched by the labwc session: it polls the core until it answers, then runs
+  `chromium --kiosk --ozone-platform=wayland …`, and relaunches Chromium whenever it exits.
+  This replaced the originally planned `smartmmm-display.service`: a crashed Chromium
+  network service used to leave a permanent white screen, and the watchdog turns that into
+  a few seconds of blank. Kiosk flags are pinned in one file so they are easy to tune.
+  *(Implemented.)*
 - Force GPU acceleration on: the Pi 4 uses `dtoverlay=vc4-kms-v3d` (default on Bookworm) and
   gives Chromium working GLES 3.0. If you see software rendering, that overlay is the culprit.
 - Bookworm uses Wayland/`labwc`. X11-era kiosk recipes (`.config/lxsession/LXDE-pi/autostart`)
-  are **stale** — do not copy them. Use a systemd user unit or `labwc` autostart.
+  are **stale** — do not copy them. Use a `labwc` autostart entry (as here) or a systemd
+  user unit.
 - Disable blanking at the compositor level; control the panel through `DisplayControl`, not `xset`.
 - Send logs to a tmpfs with a size cap to protect the SD card (§2).
-- Boot order: core ready → display launches → display retries until the core answers.
+- Boot order: core ready → display launches → display retries until the core answers —
+  implemented literally in `deploy/labwc/mirror-kiosk.sh`.
 
 ### macOS
 - `deploy/launchd/com.smartmmm.plist` — `RunAtLoad`, `KeepAlive`.
@@ -650,9 +671,9 @@ systemd/launchd
 | Milestone | Deliverable | Notes |
 |---|---|---|
 | **M0 — Skeleton** | Workspace, `protocol`, core registry, axum server, `clock` module, mirror web UI | Done: clock renders in a browser on Mac. |
-| **M1 — Control** | Phone PWA: list, show/hide, call tools. WS patches. QR pairing. Runtime state survives restart (§8.1). | The core requirement, complete. |
-| **M2 — Modules** | `weather`, `calendar`, `sysinfo`. Auto-generated config forms from JSON Schema. | Proves the module contract is ergonomic. |
-| **M3 — Appliance** | `DisplayControl`, `PresenceSensor`, night scheduling, `smartmmm doctor`. | First real Pi deployment. |
+| **M1 — Control** | Phone PWA: list, show/hide, call tools. WS patches. QR pairing. Runtime state survives restart (§8.1). | Done except QR pairing (bearer-token hook exists, no pairing flow). |
+| **M2 — Modules** | `weather`, `calendar`, `sysinfo`. Auto-generated config forms from JSON Schema. | Done: `weather` (Open-Meteo, with fetch retries) and `news` (RSS). `calendar`/`sysinfo` remain. |
+| **M3 — Appliance** | `DisplayControl`, `PresenceSensor`, night scheduling, `smartmmm doctor`. | Done on the live Pi: PIR presence (GPIO 21), display power via `vcgencmd`, `doctor`. Night scheduling not yet. |
 | **M4 — Hardening** | Config hot-reload, revision-gap resync, tool rate limiting, log ring buffer, CI cross-compile. | |
 | **M5 — Extensibility** | WASM module host behind the same contract; custom asset bundle + iframe escape hatch. | Optional; unlocks third-party modules. |
 | **M6 — Assistant** | LLM layer over `/api/v1/tools`; MCP server exposing the same registry. | The tool registry (§5.4) is the whole interface. |
@@ -682,30 +703,29 @@ SmartMMM/
 │   ├── protocol/                # shared serde types: Manifest, ViewNode, API, WS frames
 │   ├── core/                    # registry, state store, event bus, config, persistence, ModuleCtx
 │   ├── server/                  # axum routes, WS handler, static assets, auth, mDNS
-│   ├── display/                 # renderer shell (Tauri/wry) — thin, swappable
 │   └── modules/
-│       ├── clock/
-│       ├── weather/
-│       ├── calendar/
-│       └── sysinfo/
+│       ├── clock/               # implemented
+│       ├── weather/             # implemented (Open-Meteo, fetch retries)
+│       ├── news/                # implemented (RSS)
+│       └── presence/            # implemented (GPIO PIR → display power)
 ├── ui/
 │   ├── mirror/                  # mirror web frontend (consumes ViewNode)
 │   ├── phone/                   # control PWA
 │   └── shared/                  # components + protocol client shared by both
 ├── bin/smartmmm/                # the core binary (clap: run | doctor | pair | module)
-├── deploy/
-│   ├── systemd/
-│   ├── launchd/
-│   └── kiosk/                   # pinned chromium/Tauri launch configs per device
-└── docs/
+└── deploy/
+    ├── systemd/                 # design draft for a second display unit
+    ├── smartmmm.service         # the core as deployed (User=Samman, StateDirectory)
+    ├── labwc/                   # kiosk watchdog + labwc autostart (the Pi renderer)
+    └── launchd/                 # macOS units
 ```
 
 ---
 
 ## 13. Open questions
 
-1. **Weather provider** — Open-Meteo (no key) vs OpenWeatherMap (key, richer). Affects the first
-   real module's config schema.
+1. ~~**Weather provider**~~ — **Resolved: Open-Meteo** (no key, JSON, current + daily
+   forecast in one call). Configured by label + coordinates in the module config.
 2. **Calendar source** — local `.ics` URL, CalDAV, or Google/iCloud. Each is a different amount
    of OAuth work.
 3. **Is Home Assistant in the picture?** If yes, an HA/MQTT bridge module is likely the single
