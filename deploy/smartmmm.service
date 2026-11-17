@@ -1,0 +1,27 @@
+# SmartMMM systemd unit — install with:
+#   sudo cp deploy/smartmmm.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now smartmmm
+#
+# Adjust User= and ExecStart= paths to where you checked the code out and which
+# user runs it (the deployed copy on the Pi uses user `Samman` in ~/smartmmm).
+
+[Unit]
+Description=SmartMMM smart mirror
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=Samman
+ExecStart=/home/Samman/smartmmm/target/release/smartmmm run --config /etc/smartmmm/config.toml
+# Runtime state (phone-made visibility/config edits) is kept here and survives
+# redeploys; the process learns the path from STATE_DIRECTORY.
+StateDirectory=smartmmm
+# gpio   -> /dev/gpiochip0 (the PIR input)
+# video  -> vcgencmd (display_power control)
+SupplementaryGroups=gpio video
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

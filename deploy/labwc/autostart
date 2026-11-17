@@ -1,0 +1,9 @@
+# SmartMMM mirror: fullscreen browser on the local display, with a watchdog
+# that relaunches Chromium if it crashes (avoids a stuck white screen).
+#
+# Install on the Pi:
+#   mkdir -p ~/.config/labwc
+#   cp deploy/labwc/autostart ~/.config/labwc/autostart
+#   cp deploy/labwc/mirror-kiosk.sh ~/.config/labwc/mirror-kiosk.sh
+#   chmod +x ~/.config/labwc/mirror-kiosk.sh
+~/.config/labwc/mirror-kiosk.sh &
