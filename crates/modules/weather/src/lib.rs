@@ -104,6 +104,9 @@ struct CurrentWeather {
     apparent_temperature: f64,
     weather_code: i32,
     wind_speed_10m: f64,
+    /// 1 during the day, 0 at night — selects the day/night icon variant.
+    #[serde(default)]
+    is_day: i32,
 }
 
 /// Open-Meteo returns the daily block as parallel arrays, one entry per day.
@@ -160,7 +163,7 @@ impl WeatherModule {
     fn endpoint(&self) -> String {
         format!(
             "https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}\
-             &current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m\
+             &current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,is_day\
              &daily=weather_code,temperature_2m_max,temperature_2m_min\
              &forecast_days={days}\
              &temperature_unit={t}&wind_speed_unit={w}&timezone=auto",
@@ -283,14 +286,17 @@ impl WeatherModule {
         let mut children = vec![
             ViewNode::styled(label, TextSize::Sm, Weight::Light, Align::Center),
             // Icon beside the temperature: the temperature stays the focal
-            // point, the emoji gives it a glanceable glyph.
+            // point, with the condition icon as a glanceable glyph.
             ViewNode::stack(
                 Axis::Horizontal,
                 10.0,
                 vec![
-                    ViewNode::Icon {
-                        name: weather_code_emoji(current.weather_code).to_string(),
-                        size: Some(52.0),
+                    ViewNode::Image {
+                        src: format!(
+                            "/icons/weather/{}.svg",
+                            weather_icon_name(current.weather_code, current.is_day == 1)
+                        ),
+                        max_height: Some(52.0),
                     },
                     ViewNode::styled(
                         format!(
@@ -363,9 +369,9 @@ impl WeatherModule {
                             Weight::Light,
                             Align::Center,
                         ),
-                        ViewNode::Icon {
-                            name: weather_code_emoji(code).to_string(),
-                            size: None,
+                        ViewNode::Image {
+                            src: format!("/icons/weather/{}.svg", weather_icon_name(code, true)),
+                            max_height: Some(26.0),
                         },
                         ViewNode::styled(temps, TextSize::Sm, Weight::Normal, Align::Center),
                     ],
@@ -551,22 +557,43 @@ fn weather_code_label(code: i32) -> &'static str {
     }
 }
 
-/// Emoji glyph for each WMO code, used beside the temperature and in the
-/// forecast strip. Emoji render as color glyphs, so they read on any theme.
-fn weather_code_emoji(code: i32) -> &'static str {
+/// Map a WMO weather code to one of the icon SVGs under `/icons/weather/`.
+/// Daily forecasts are rendered with the day variant; the current-conditions
+/// icon picks day or night from the API's `is_day` flag.
+fn weather_icon_name(code: i32, is_day: bool) -> &'static str {
     match code {
-        0 => "☀️",
-        1 => "🌤️",
-        2 => "⛅",
-        3 => "☁️",
-        45 | 48 => "🌫️",
-        51 | 53 | 55 => "🌦️",
-        56 | 57 | 66 | 67 => "🌧️",
-        71 | 73 | 75 | 77 => "❄️",
-        80..=82 => "🌧️",
-        85 | 86 => "🌨️",
-        95 | 96 | 99 => "⛈️",
-        _ => "🌡️",
+        0 | 1 => {
+            if is_day {
+                "clear-day"
+            } else {
+                "clear-night"
+            }
+        }
+        2 => {
+            if is_day {
+                "partly-cloudy-day"
+            } else {
+                "partly-cloudy-night"
+            }
+        }
+        3 => "cloudy",
+        45 | 48 => "mist",
+        51..=57 | 61..=67 | 80..=82 => {
+            if is_day {
+                "rain-day"
+            } else {
+                "rain-night"
+            }
+        }
+        71..=77 | 85 | 86 => "snow",
+        95 | 96 | 99 => "thunderstorm",
+        _ => {
+            if is_day {
+                "partly-cloudy-day"
+            } else {
+                "partly-cloudy-night"
+            }
+        }
     }
 }
 

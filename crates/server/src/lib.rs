@@ -35,6 +35,46 @@ const PHONE_JS: &str = include_str!("../../../ui/phone/phone.js");
 const SHARED_JS: &str = include_str!("../../../ui/shared/protocol.js");
 const SHARED_CSS: &str = include_str!("../../../ui/shared/style.css");
 
+/// Weather icon SVGs, keyed by WMO-code-derived name (see the weather module).
+/// Embedded like the UI assets so the deployment stays a single binary.
+const WEATHER_ICONS: &[(&str, &str)] = &[
+    (
+        "clear-day",
+        include_str!("../../../ui/icons/weather/clear-day.svg"),
+    ),
+    (
+        "clear-night",
+        include_str!("../../../ui/icons/weather/clear-night.svg"),
+    ),
+    (
+        "cloudy",
+        include_str!("../../../ui/icons/weather/cloudy.svg"),
+    ),
+    ("mist", include_str!("../../../ui/icons/weather/mist.svg")),
+    (
+        "partly-cloudy-day",
+        include_str!("../../../ui/icons/weather/partly-cloudy-day.svg"),
+    ),
+    (
+        "partly-cloudy-night",
+        include_str!("../../../ui/icons/weather/partly-cloudy-night.svg"),
+    ),
+    (
+        "rain-day",
+        include_str!("../../../ui/icons/weather/rain-day.svg"),
+    ),
+    (
+        "rain-night",
+        include_str!("../../../ui/icons/weather/rain-night.svg"),
+    ),
+    ("rain", include_str!("../../../ui/icons/weather/rain.svg")),
+    ("snow", include_str!("../../../ui/icons/weather/snow.svg")),
+    (
+        "thunderstorm",
+        include_str!("../../../ui/icons/weather/thunderstorm.svg"),
+    ),
+];
+
 #[derive(Clone)]
 pub struct AppState {
     host: Host,
@@ -59,6 +99,7 @@ pub fn router(host: Host, config: Config) -> Router {
         .route("/phone.js", get(phone_script))
         .route("/shared/protocol.js", get(shared_script))
         .route("/shared/style.css", get(shared_style))
+        .route("/icons/weather/{name}", get(weather_icon))
         // --- API ---
         .route("/api/v1/info", get(info))
         .route("/api/v1/modules", get(list_modules))
@@ -102,6 +143,20 @@ async fn shared_script() -> Response {
 
 async fn shared_style() -> Response {
     asset(SHARED_CSS, "text/css; charset=utf-8")
+}
+
+async fn weather_icon(Path(name): Path<String>) -> Response {
+    // The path captures the filename with its extension (`clear-day.svg`);
+    // accept both with and without.
+    let key = name.strip_suffix(".svg").unwrap_or(&name);
+    match WEATHER_ICONS.iter().find(|(n, _)| *n == key) {
+        Some((_, svg)) => (
+            [(header::CONTENT_TYPE, "image/svg+xml")],
+            (*svg).to_string(),
+        )
+            .into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 async fn not_found() -> Response {
