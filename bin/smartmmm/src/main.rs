@@ -72,6 +72,7 @@ async fn main() -> Result<()> {
 fn registry() -> Registry {
     let mut registry = Registry::new();
     registry.register(ModuleFactory::new(build_clock));
+    registry.register(ModuleFactory::new(build_gestures));
     registry.register(ModuleFactory::new(build_weather));
     registry.register(ModuleFactory::new(build_news));
     registry.register(ModuleFactory::new(build_presence));
@@ -80,6 +81,10 @@ fn registry() -> Registry {
 
 fn build_clock() -> Box<dyn Module> {
     Box::new(smmm_mod_clock::ClockModule::new())
+}
+
+fn build_gestures() -> Box<dyn Module> {
+    Box::new(smmm_mod_gestures::GesturesModule::new())
 }
 
 fn build_weather() -> Box<dyn Module> {

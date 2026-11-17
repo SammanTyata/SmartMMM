@@ -5,6 +5,7 @@ members = [
     "crates/core",
     "crates/server",
     "crates/modules/clock",
+    "crates/modules/gestures",
     "crates/modules/weather",
     "crates/modules/news",
     "crates/modules/presence",
@@ -22,6 +23,7 @@ smmm-protocol = { path = "crates/protocol" }
 smmm-core = { path = "crates/core" }
 smmm-server = { path = "crates/server" }
 smmm-mod-clock = { path = "crates/modules/clock" }
+smmm-mod-gestures = { path = "crates/modules/gestures" }
 smmm-mod-weather = { path = "crates/modules/weather" }
 smmm-mod-news = { path = "crates/modules/news" }
 smmm-mod-presence = { path = "crates/modules/presence" }

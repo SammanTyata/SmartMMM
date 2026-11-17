@@ -73,6 +73,25 @@ function removeModule(id) {
   nodes.delete(id);
 }
 
+// Transient toast, shown whenever any module announces something through the
+// event bus (e.g. a detected gesture). One at a time; later ones replace it.
+let toastTimer = null;
+function showToast(message, kind = "info") {
+  let el = document.getElementById("toast");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "toast";
+    document.body.appendChild(el);
+  }
+  el.textContent = message;
+  el.dataset.kind = kind;
+  el.dataset.show = "true";
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    el.dataset.show = "false";
+  }, 2200);
+}
+
 async function main() {
   buildShell();
 
@@ -96,6 +115,9 @@ async function main() {
           break;
         case "removed":
           removeModule(msg.id);
+          break;
+        case "toast":
+          showToast(msg.message, msg.kind);
           break;
       }
     },

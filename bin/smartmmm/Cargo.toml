@@ -12,6 +12,7 @@ path = "src/main.rs"
 smmm-core.workspace = true
 smmm-server.workspace = true
 smmm-mod-clock.workspace = true
+smmm-mod-gestures.workspace = true
 smmm-mod-weather.workspace = true
 smmm-mod-news.workspace = true
 smmm-mod-presence.workspace = true

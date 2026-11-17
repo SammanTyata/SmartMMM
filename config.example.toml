@@ -76,3 +76,18 @@ gpio_pin = 21          # BCM numbering: physical pin 40
 active_high = true
 timeout_secs = 30
 display_driver = "auto"
+
+# Headless module: PAJ7620U2 gesture sensor on I2C. Each mapping fires another
+# module's tool on a detected gesture; hiding the module stops the sensor.
+[modules.gestures]
+visible = true
+order = 91
+[modules.gestures.config]
+i2c_bus = 1
+i2c_address = 115      # 0x73, the PAJ7620U2 default
+debounce_ms = 500
+mappings = [
+  { gesture = "right", module = "news", tool = "next" },
+  { gesture = "left", module = "news", tool = "previous" },
+  { gesture = "wave", module = "presence", tool = "display_on" },
+]

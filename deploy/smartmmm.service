@@ -19,7 +19,8 @@ ExecStart=/home/Samman/smartmmm/target/release/smartmmm run --config /etc/smartm
 StateDirectory=smartmmm
 # gpio   -> /dev/gpiochip0 (the PIR input)
 # video  -> vcgencmd (display_power control)
-SupplementaryGroups=gpio video
+# i2c    -> /dev/i2c-1 (the PAJ7620U2 gesture sensor)
+SupplementaryGroups=gpio video i2c
 Restart=on-failure
 RestartSec=2
 

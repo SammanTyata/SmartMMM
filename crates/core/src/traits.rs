@@ -1,10 +1,12 @@
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use serde_json::Value;
 use smmm_protocol::{Manifest, ModuleStatus, ToolDescriptor, ViewNode};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 /// Something a module pushes out-of-band to the core.
 #[derive(Debug, Clone)]
@@ -12,6 +14,74 @@ pub enum ModuleUpdate {
     View(ViewNode),
     Status(ModuleStatus),
     Toast { kind: String, message: String },
+}
+
+/// Command sent to a running module's task by the core (or, through
+/// [`ModuleRouter`], by another module).
+pub enum ModuleCommand {
+    SetVisible(bool),
+    SetConfig {
+        config: Value,
+        reply: oneshot::Sender<Result<()>>,
+    },
+    CallTool {
+        tool: String,
+        args: Value,
+        reply: oneshot::Sender<Result<Value>>,
+    },
+    Stop,
+}
+
+/// Shared registry of every running module's command channel.
+pub type CommandMap = Arc<Mutex<HashMap<String, mpsc::UnboundedSender<ModuleCommand>>>>;
+
+/// Lets one module call another module's tools.
+///
+/// Two guards, as designed in ARCHITECTURE.md §5.4:
+/// - **Self-calls are rejected.** A module calling its own tool would await a
+///   reply from the very task that is currently awaiting it — a deadlock.
+/// - **Every call is bounded by a timeout**, so a wedged target module cannot
+///   hang the caller forever.
+#[derive(Clone)]
+pub struct ModuleRouter {
+    owner: Arc<str>,
+    commands: CommandMap,
+}
+
+impl ModuleRouter {
+    pub fn new(owner: impl Into<Arc<str>>, commands: CommandMap) -> Self {
+        Self {
+            owner: owner.into(),
+            commands,
+        }
+    }
+
+    /// Call `<module>__<tool>` with `args` and wait for the result.
+    pub async fn call_tool(&self, module: &str, tool: &str, args: Value) -> Result<Value> {
+        if module == self.owner.as_ref() {
+            anyhow::bail!("a module cannot call its own tools (`{module}__{tool}`)");
+        }
+        let tx = self
+            .commands
+            .lock()
+            .expect("command map lock poisoned")
+            .get(module)
+            .cloned()
+            .ok_or_else(|| anyhow!("unknown module: {module}"))?;
+
+        let (reply_tx, reply_rx) = oneshot::channel();
+        tx.send(ModuleCommand::CallTool {
+            tool: tool.to_string(),
+            args,
+            reply: reply_tx,
+        })
+        .map_err(|_| anyhow!("module task for `{module}` is gone"))?;
+
+        match tokio::time::timeout(Duration::from_secs(2), reply_rx).await {
+            Ok(reply) => reply.map_err(|_| anyhow!("module task for `{module}` dropped the reply"))?,
+            Err(_) => anyhow::bail!("`{module}__{tool}` timed out after 2s"),
+        }
+    }
 }
 
 /// Handles a module receives in [`Module::init`] and may keep for its lifetime.
@@ -22,15 +92,24 @@ pub enum ModuleUpdate {
 pub struct ModuleCtx {
     id: Arc<str>,
     tx: mpsc::UnboundedSender<ModuleUpdate>,
+    router: ModuleRouter,
 }
 
 impl ModuleCtx {
-    pub fn new(id: impl Into<Arc<str>>, tx: mpsc::UnboundedSender<ModuleUpdate>) -> Self {
-        Self { id: id.into(), tx }
+    pub fn new(id: impl Into<Arc<str>>, tx: mpsc::UnboundedSender<ModuleUpdate>, commands: CommandMap) -> Self {
+        let id = id.into();
+        let router = ModuleRouter::new(id.clone(), commands);
+        Self { id, tx, router }
     }
 
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    /// Call another module's tool (`<module>__<tool>` style, but by parts).
+    /// Bounded by a 2s timeout and rejects self-calls — see [`ModuleRouter`].
+    pub async fn call_module_tool(&self, module: &str, tool: &str, args: Value) -> Result<Value> {
+        self.router.call_tool(module, tool, args).await
     }
 
     pub fn publish(&self, update: ModuleUpdate) {

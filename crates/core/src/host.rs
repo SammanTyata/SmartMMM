@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
@@ -17,22 +17,7 @@ use crate::persist::{Baseline, Persist, StateOptions};
 use crate::registry::Registry;
 use crate::state::StateStore;
 use crate::tools::{core_tools, optional_str, required, required_str};
-use crate::traits::{Module, ModuleCtx, ModuleUpdate};
-
-/// Command sent from the API surface to a module's task.
-pub enum ModuleCommand {
-    SetVisible(bool),
-    SetConfig {
-        config: Value,
-        reply: oneshot::Sender<Result<()>>,
-    },
-    CallTool {
-        tool: String,
-        args: Value,
-        reply: oneshot::Sender<Result<Value>>,
-    },
-    Stop,
-}
+use crate::traits::{CommandMap, Module, ModuleCommand, ModuleCtx, ModuleUpdate};
 
 /// Owns every running module and mediates all access to them.
 ///
@@ -43,7 +28,7 @@ pub enum ModuleCommand {
 #[derive(Clone)]
 pub struct Host {
     store: Arc<StateStore>,
-    commands: Arc<HashMap<String, mpsc::UnboundedSender<ModuleCommand>>>,
+    commands: CommandMap,
     started: Instant,
     /// `None` when the caller asked for a stateless run.
     persist: Option<Persist>,
@@ -56,7 +41,7 @@ impl Host {
         store: Arc<StateStore>,
         state: StateOptions,
     ) -> Result<Self> {
-        let mut commands = HashMap::new();
+        let commands: CommandMap = Arc::new(Mutex::new(HashMap::new()));
         let mut baseline = HashMap::new();
 
         for factory in registry.factories() {
@@ -144,9 +129,12 @@ impl Host {
 
             let (ctx_tx, ctx_rx) = mpsc::unbounded_channel();
             let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
-            commands.insert(id.clone(), cmd_tx);
+            commands
+                .lock()
+                .expect("command map lock poisoned")
+                .insert(id.clone(), cmd_tx);
 
-            let ctx = ModuleCtx::new(id.clone(), ctx_tx);
+            let ctx = ModuleCtx::new(id.clone(), ctx_tx, commands.clone());
             tokio::spawn(run_module(
                 id,
                 module,
@@ -168,7 +156,7 @@ impl Host {
 
         Ok(Self {
             store,
-            commands: Arc::new(commands),
+            commands,
             started: Instant::now(),
             persist,
         })
@@ -203,14 +191,23 @@ impl Host {
     }
 
     pub fn module_ids(&self) -> Vec<String> {
-        let mut ids: Vec<String> = self.commands.keys().cloned().collect();
+        let mut ids: Vec<String> = self
+            .commands
+            .lock()
+            .expect("command map lock poisoned")
+            .keys()
+            .cloned()
+            .collect();
         ids.sort();
         ids
     }
 
-    fn sender(&self, id: &str) -> Result<&mpsc::UnboundedSender<ModuleCommand>> {
+    fn sender(&self, id: &str) -> Result<mpsc::UnboundedSender<ModuleCommand>> {
         self.commands
+            .lock()
+            .expect("command map lock poisoned")
             .get(id)
+            .cloned()
             .ok_or_else(|| anyhow!("unknown module: {id}"))
     }
 

@@ -1,0 +1,21 @@
+[package]
+name = "smmm-mod-gestures"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+smmm-core.workspace = true
+smmm-protocol.workspace = true
+
+anyhow.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+# I2C is a Linux thing (the Pi). The driver code is cfg-gated so macOS
+# development builds stay clean; there the module just reports degraded.
+[target.'cfg(target_os = "linux")'.dependencies]
+i2cdev = "0.5"

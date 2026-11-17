@@ -12,12 +12,12 @@ pub mod tools;
 pub mod traits;
 
 pub use config::Config;
-pub use host::{Host, ModuleCommand};
+pub use host::Host;
 pub use persist::{StateDoc, StateOptions};
 pub use registry::{ModuleFactory, Registry};
 pub use state::{Event, StateStore};
 pub use tools::core_tools;
-pub use traits::{Module, ModuleCtx, ModuleUpdate};
+pub use traits::{Module, ModuleCommand, ModuleCtx, ModuleRouter, ModuleUpdate};
 
 /// Current time as RFC 3339 with milliseconds, e.g. `2026-10-15T09:31:00.123Z`.
 pub fn now_rfc3339() -> String {

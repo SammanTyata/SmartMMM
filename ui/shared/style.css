@@ -135,6 +135,36 @@ img.view-image {
 
 /* ---------- Mirror ---------- */
 
+/* Transient toast from the event bus (module announcements). */
+#toast {
+  position: fixed;
+  left: 50%;
+  bottom: 5rem;
+  transform: translateX(-50%) translateY(0.6rem);
+  max-width: 80vw;
+  padding: 0.45rem 1.2rem;
+  border-radius: 999px;
+  background: rgba(20, 20, 25, 0.85);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: var(--size-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  pointer-events: none;
+}
+
+#toast[data-show="true"] {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+#toast[data-kind="err"] {
+  color: var(--err);
+}
+
 .mirror {
   display: grid;
   height: 100vh;
