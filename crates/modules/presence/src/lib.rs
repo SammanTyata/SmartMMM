@@ -185,6 +185,32 @@ impl PresenceModule {
             ctx.warn(message);
         }
     }
+
+    /// Sync `display_on` with what the display driver reports.
+    ///
+    /// At boot the module merely *assumes* the display is on. If the service
+    /// restarts while the display is actually off (e.g. it slept just before a
+    /// redeploy), that stale assumption makes `set_display_power(true)` a
+    /// no-op on the next motion — motion is detected, but no wake command is
+    /// ever sent, and the mirror looks dead. Querying once at startup removes
+    /// the guess. Drivers without a cheap state query keep the default.
+    fn sync_display_state(&mut self) {
+        if self.resolve_driver() != "pi_vcgencmd" {
+            return;
+        }
+        let output = Command::new("vcgencmd").arg("display_power").output();
+        if let Ok(output) = output {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if let Some(state) = stdout.trim().strip_prefix("display_power=") {
+                let on = state.trim() == "1";
+                self.display_on = on;
+                self.info(format!(
+                    "display state synced from vcgencmd: {}",
+                    if on { "on" } else { "off" }
+                ));
+            }
+        }
+    }
 }
 
 impl Default for PresenceModule {
@@ -275,6 +301,7 @@ impl Module for PresenceModule {
 
     async fn init(&mut self, ctx: ModuleCtx) -> anyhow::Result<()> {
         self.ctx = Some(ctx);
+        self.sync_display_state();
         Ok(())
     }
 
