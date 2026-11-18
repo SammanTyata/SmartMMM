@@ -8,6 +8,7 @@
 //! toasts instead). Hiding it in the phone disables the sensor polling
 //! entirely, exactly like the presence module's kill switch.
 
+use std::cmp::Reverse;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -37,9 +38,17 @@ const GES_ANTI_CLOCKWISE: u8 = 0x80;
 /// Gesture bit in `GES_RESULT_1`.
 const GES_WAVE: u8 = 0x01;
 
-/// Poll fast enough to catch a swipe (~100ms hand transit) but not so fast
-/// the I2C bus is saturated.
-const POLL_INTERVAL: Duration = Duration::from_millis(100);
+/// Poll fast enough that a swipe is seen several times — the confirmation
+/// window needs repeated samples to out-vote single-sample artifacts — but
+/// not so fast the I2C bus is saturated.
+const POLL_INTERVAL: Duration = Duration::from_millis(25);
+/// Detections are collected over this window and the majority gesture is
+/// what fires. The PAJ7620U2 reports a *transient* direction for part of a
+/// compound movement (e.g. the hand arcs down during a rightward swipe), so
+/// the first decoded sample is often noise; a real swipe persists across
+/// many samples and wins the vote. Wave (the bit in result 1) dominates its
+/// window: waving is by definition a mix of directions.
+const CONFIRM_WINDOW: Duration = Duration::from_millis(120);
 /// One action per gesture: repeated detections inside this window are the
 /// same hand movement trailing off.
 const DEBOUNCE: Duration = Duration::from_millis(500);
@@ -173,6 +182,60 @@ pub struct GesturesModule {
     last_retry: Option<Instant>,
     last_gesture: Option<(String, Instant)>,
     last_action: Option<Instant>,
+    /// Detection being collected, if any.
+    window: Option<ConfirmWindow>,
+}
+
+/// Samples collected within [`CONFIRM_WINDOW`], resolved to the gesture to
+/// fire. Pure logic, unit-tested without hardware.
+struct ConfirmWindow {
+    started: Instant,
+    /// (gesture, sample count), in first-seen order.
+    counts: Vec<(String, u32)>,
+    /// The wave bit appeared at least once in this window.
+    wave_seen: bool,
+}
+
+impl ConfirmWindow {
+    fn start(sample: &str, now: Instant) -> Self {
+        let mut window = Self {
+            started: now,
+            counts: Vec::new(),
+            wave_seen: false,
+        };
+        window.sample(sample);
+        window
+    }
+
+    fn sample(&mut self, gesture: &str) {
+        if gesture == "wave" {
+            self.wave_seen = true;
+            return;
+        }
+        if let Some((_, count)) = self.counts.iter_mut().find(|(g, _)| g == gesture) {
+            *count += 1;
+        } else {
+            self.counts.push((gesture.to_string(), 1));
+        }
+    }
+
+    fn expired(&self, now: Instant) -> bool {
+        now.duration_since(self.started) >= CONFIRM_WINDOW
+    }
+
+    /// The gesture this window resolves to: a wave if the wave bit was seen
+    /// at all (waving is a mix of directions by definition), else the most
+    /// frequently sampled gesture, ties broken by first appearance.
+    fn resolve(&self) -> Option<String> {
+        if self.wave_seen {
+            return Some("wave".to_string());
+        }
+        self.counts
+            .iter()
+            .enumerate()
+            .max_by_key(|(index, (_, count))| (*count, Reverse(*index)))
+            .map(|(_, (gesture, _))| gesture.clone())
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -243,12 +306,15 @@ impl GesturesModule {
             last_retry: None,
             last_gesture: None,
             last_action: None,
+            window: None,
         }
     }
 
-    /// Interpret the raw result registers as a gesture name. Only one bit is
-    /// expected per detection; mask out anything unexpected.
+    /// Give wave priority; otherwise accept only unambiguous direction bits.
     fn decode(result0: u8, result1: u8) -> Option<&'static str> {
+        if result1 & GES_WAVE != 0 {
+            return Some("wave");
+        }
         let name = match result0 {
             GES_RIGHT => "right",
             GES_LEFT => "left",
@@ -258,15 +324,35 @@ impl GesturesModule {
             GES_BACKWARD => "backward",
             GES_CLOCKWISE => "clockwise",
             GES_ANTI_CLOCKWISE => "anticlockwise",
-            _ => {
-                if result1 & GES_WAVE != 0 {
-                    "wave"
-                } else {
-                    return None;
-                }
-            }
+            _ => return None,
         };
         Some(name)
+    }
+
+    /// Collect detections until the deadline, including ticks with no result
+    /// so a single detection can still finish its confirmation window.
+    fn process_results(&mut self, result0: u8, result1: u8, now: Instant) -> Option<String> {
+        if self.last_action.is_some_and(|at| {
+            now.duration_since(at) < Duration::from_millis(self.config.debounce_ms)
+        }) {
+            self.window = None;
+            return None;
+        }
+        if self
+            .window
+            .as_ref()
+            .is_some_and(|window| window.expired(now))
+        {
+            return self.window.take().and_then(|window| window.resolve());
+        }
+        if let Some(gesture) = Self::decode(result0, result1) {
+            if let Some(window) = &mut self.window {
+                window.sample(gesture);
+            } else {
+                self.window = Some(ConfirmWindow::start(gesture, now));
+            }
+        }
+        None
     }
 
     /// Run every mapping for `gesture`: announce it, then fire each target
@@ -279,19 +365,25 @@ impl GesturesModule {
         }
         self.last_gesture = Some((gesture.to_string(), Instant::now()));
         self.last_action = Some(Instant::now());
+        self.window = None;
 
         let mappings = self.config.mappings.clone();
         for mapping in mappings.iter().filter(|m| m.gesture == gesture) {
             let Some(ctx) = &self.ctx else { continue };
             if mapping.module == "gestures" {
-                ctx.warn(format!("mapping `{gesture}` targets `gestures` itself — ignored"));
+                ctx.warn(format!(
+                    "mapping `{gesture}` targets `gestures` itself — ignored"
+                ));
                 continue;
             }
             match ctx
                 .call_module_tool(&mapping.module, &mapping.tool, json!({}))
                 .await
             {
-                Ok(_) => ctx.info(format!("`{gesture}` → {}__{}", mapping.module, mapping.tool)),
+                Ok(_) => ctx.info(format!(
+                    "`{gesture}` → {}__{}",
+                    mapping.module, mapping.tool
+                )),
                 Err(e) => ctx.warn(format!(
                     "`{gesture}` → {}__{} failed: {e:#}",
                     mapping.module, mapping.tool
@@ -447,7 +539,9 @@ impl Module for GesturesModule {
                             }
                         }
                         Err(e) => {
-                            self.status = ModuleStatus::Degraded { message: e.to_string() };
+                            self.status = ModuleStatus::Degraded {
+                                message: e.to_string(),
+                            };
                         }
                     }
                 }
@@ -462,19 +556,14 @@ impl Module for GesturesModule {
             match read {
                 Ok((result0, result1)) => {
                     self.status = ModuleStatus::Ok;
-                    if let Some(gesture) = Self::decode(result0, result1) {
-                        let debounced = self
-                            .last_action
-                            .map(|at| at.elapsed() < Duration::from_millis(self.config.debounce_ms))
-                            .unwrap_or(false);
-                        if !debounced {
-                            self.dispatch(gesture).await;
-                        }
+                    if let Some(gesture) = self.process_results(result0, result1, Instant::now()) {
+                        self.dispatch(&gesture).await;
                     }
                 }
                 Err(e) => {
                     // Bus hiccup: drop the device so the next tick reopens it.
                     self.device = None;
+                    self.window = None;
                     self.status = ModuleStatus::Degraded {
                         message: format!("i2c read failed: {e:#}"),
                     };
@@ -497,6 +586,7 @@ impl Module for GesturesModule {
             self.device = None;
         }
         self.last_action = None;
+        self.window = None;
         Ok(())
     }
 
@@ -508,7 +598,10 @@ impl Module for GesturesModule {
                     .and_then(Value::as_str)
                     .ok_or_else(|| anyhow::anyhow!("missing required string `gesture`"))?;
                 if !GESTURES.contains(&gesture) {
-                    anyhow::bail!("unknown gesture `{gesture}` (one of: {})", GESTURES.join(", "));
+                    anyhow::bail!(
+                        "unknown gesture `{gesture}` (one of: {})",
+                        GESTURES.join(", ")
+                    );
                 }
                 self.dispatch(gesture).await;
                 Ok(self.status_json())
@@ -528,6 +621,9 @@ impl Module for GesturesModule {
 
     fn set_visible(&mut self, visible: bool) {
         self.visible = visible;
+        if !visible {
+            self.window = None;
+        }
     }
 
     fn view(&self) -> ViewNode {
@@ -565,6 +661,100 @@ mod tests {
         assert_eq!(GesturesModule::decode(0x80, 0x00), Some("anticlockwise"));
         assert_eq!(GesturesModule::decode(0x00, 0x01), Some("wave"));
         assert_eq!(GesturesModule::decode(0x00, 0x00), None);
+    }
+
+    #[test]
+    fn confirmation_prefers_repeated_direction_over_initial_noise() {
+        let mut module = GesturesModule::new();
+        let now = Instant::now();
+        assert_eq!(module.process_results(GES_DOWN, 0, now), None);
+        assert_eq!(
+            module.process_results(GES_RIGHT, 0, now + POLL_INTERVAL),
+            None
+        );
+        assert_eq!(
+            module.process_results(GES_RIGHT, 0, now + POLL_INTERVAL * 2),
+            None
+        );
+        assert_eq!(
+            module.process_results(0, 0, now + CONFIRM_WINDOW),
+            Some("right".into())
+        );
+        assert!(module.window.is_none());
+    }
+
+    #[test]
+    fn single_detection_finishes_on_an_empty_poll() {
+        let mut module = GesturesModule::new();
+        let now = Instant::now();
+        assert_eq!(module.process_results(GES_LEFT, 0, now), None);
+        assert_eq!(module.process_results(0, 0, now + POLL_INTERVAL), None);
+        assert_eq!(
+            module.process_results(0, 0, now + CONFIRM_WINDOW),
+            Some("left".into())
+        );
+        assert_eq!(module.process_results(0, 0, now + CONFIRM_WINDOW * 2), None);
+    }
+
+    #[test]
+    fn confirmation_breaks_ties_by_first_detection() {
+        let mut module = GesturesModule::new();
+        let now = Instant::now();
+        module.process_results(GES_LEFT, 0, now);
+        module.process_results(GES_RIGHT, 0, now + POLL_INTERVAL);
+        assert_eq!(
+            module.process_results(0, 0, now + CONFIRM_WINDOW),
+            Some("left".into())
+        );
+    }
+
+    #[test]
+    fn wave_overrides_simultaneous_and_earlier_directions() {
+        let mut module = GesturesModule::new();
+        let now = Instant::now();
+        module.process_results(GES_RIGHT, 0, now);
+        module.process_results(GES_RIGHT, 0, now + POLL_INTERVAL);
+        module.process_results(GES_LEFT, GES_WAVE, now + POLL_INTERVAL * 2);
+        assert_eq!(
+            module.process_results(0, 0, now + CONFIRM_WINDOW),
+            Some("wave".into())
+        );
+        assert_eq!(GesturesModule::decode(GES_LEFT | GES_RIGHT, 0), None);
+    }
+
+    #[test]
+    fn debounce_discards_detections_until_it_expires() {
+        let mut module = GesturesModule::new();
+        let now = Instant::now();
+        module.last_action = Some(now);
+        assert_eq!(
+            module.process_results(GES_RIGHT, 0, now + POLL_INTERVAL),
+            None
+        );
+        assert!(module.window.is_none());
+        let after_debounce = now + DEBOUNCE;
+        module.process_results(GES_LEFT, 0, after_debounce);
+        assert_eq!(
+            module.process_results(0, 0, after_debounce + CONFIRM_WINDOW),
+            Some("left".into())
+        );
+    }
+
+    #[tokio::test]
+    async fn hiding_or_reconfiguring_discards_pending_detections() {
+        let mut module = GesturesModule::new();
+        let now = Instant::now();
+        module.process_results(GES_RIGHT, 0, now);
+        module.set_visible(false);
+        module.set_visible(true);
+        assert_eq!(module.process_results(0, 0, now + CONFIRM_WINDOW), None);
+
+        module.process_results(GES_LEFT, 0, now);
+        module
+            .on_config(json!({ "debounce_ms": 250 }))
+            .await
+            .unwrap();
+        assert_eq!(module.process_results(0, 0, now + CONFIRM_WINDOW), None);
     }
 
     #[test]

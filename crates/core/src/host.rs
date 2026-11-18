@@ -489,7 +489,7 @@ async fn run_module(
     sync_state(&store, &id, module.as_ref());
 
     let mut ticker =
-        tokio::time::interval(module.update_interval().max(Duration::from_millis(100)));
+        tokio::time::interval(module.update_interval().max(Duration::from_millis(1)));
     ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
     ticker.tick().await; // consume the immediate first tick
 
